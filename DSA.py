@@ -86,85 +86,37 @@ def sha(n):
 def sha_to_int(n):
     return int(sha(n).hexdigest(), 16)
 
-
-def gen_param():
-    L = 1024
-    while True:
+def gen_param(L=1024):
+    found = False
+    while not found:
         S = random.getrandbits(20)
-        hash1 = sha(S).digest()
-        hash2 = sha(S+1).digest()
+        q = gen_big_prime(160)
 
-        q = 0
-        for i in range(0, 20):
-            c = hash1[i] ^ hash2[i]
-            if i == 0:
-                c = c | 128
-            if i == 19:
-                c = c | 1
-            q = q * 256 + c
+        n = (L-1) // 160
+        b = (q >> 5) & 15
+        C = 0
+        N = 2
+        V = {}
+        powb = pow(2, b)
+        powL1 = pow(2, L-1)
 
-        while(not miller_rabin_test(q)):
-            q += 2
-
-        if pow(2, 159) < q < pow(2, 160):
-            break
-
-    n = (L-1) // 160
-    b = (q >> 5) & 15
-    C = 0
-    N = 2
-    V = {}
-    powb = pow(2, b)
-    powL1 = pow(2, L-1)
-
-    while C < 4096:
-        for k in range(0, n+1):
-            V[k] = int(sha(S + N + k).hexdigest(), 16)
-        W = V[n] % powb
-        for k in range(n-1, -1, -1):
-            W = (W << 160) + V[k]
-        X = W + powL1
-        p = X-(X % (2 * q) - 1)
-        if(powL1 <= p and miller_rabin_test(p)):
-            break;
-
-        C += 1
-        N += n + 1
-        
+        while C < 4096:
+            for k in range(0, n+1):
+                V[k] = sha_to_int(S + N + k)
+            W = V[n] % powb
+            for k in range(n-1, -1, -1):
+                W = (W << 160) + V[k]
+            X = W + powL1
+            p = X-(X % (2 * q) - 1)
+            if(powL1 <= p and miller_rabin_test(p)):
+                found = True
+                break;
+            C += 1
+            N += n + 1
     return p, q
-
-def test_gen_param():
-    L = 1024
-    S = random.getrandbits(20)
-    q = gen_big_prime(160)
-
-    n = (L-1) // 160
-    b = (q >> 5) & 15
-    C = 0
-    N = 2
-    V = {}
-    powb = pow(2, b)
-    powL1 = pow(2, L-1)
-
-    while C < 4096:
-        for k in range(0, n+1):
-            V[k] = sha_to_int(S + N + k)
-        W = V[n] % powb
-        for k in range(n-1, -1, -1):
-            W = (W << 160) + V[k]
-        X = W + powL1
-        p = X-(X % (2 * q) - 1)
-        if(powL1 <= p and miller_rabin_test(p)):
-            break;
-
-        C += 1
-        N += n + 1
-        
-    return p, q
-
 
 def gen_key():
-    p, q = test_gen_param()
+    p, q = gen_param()
     g = fast_pow(2, (p - 1) // q, p)
     x = random.randrange(1, q)
     y = fast_pow(g, x, p)
@@ -173,22 +125,42 @@ def gen_key():
 def sign(m, p, q, g, x):
     s = 0
     while s == 0:
+        blind = random.randrange(2, q)
         k = random.randrange(2, q)
-        r = fast_pow(g, k, p) % q
-        s = (invert(k, q) * sha_string_to_int(m) + x * r) % q
+
+        inv_blind_k = invert(blind * k, q)
+        blind_x = x * blind
         
+        r = fast_pow(g, k, p) % q
+        s = (inv_blind_k * (sha_string_to_int(m) * blind + blind_x * r)) % q
+    return r, s
+
+def verify(m, r, s, p, q):
+    if not (0 < r < q or 0 < s < q):
+        print("fail (0 < r < q or 0 < s < q) not satisfied")
+
+    w = invert(s, q)
+    u1 = (sha_string_to_int(m) * w) % q
+    u2 = (r * w) % q
+    v = ((fast_pow(g, u1, p) * fast_pow(y, u2, p)) % p) % q
+    
+    # print("v =", v)
+    return v == r
+
+if __name__ == "__main__":    
+    print("keys:")
+    p, q, g, x, y = gen_key()
+    print("p =", p)
+    print("q =", q)
+    # print("d =", p % q)
+
+    print("\nsign:")
+    m = "meow meow"
+    r, s = sign(m, p, q, g, x)
+    print("m =", m)
     print("r =", r)
     print("s =", s)
 
-p, q, g, x, y = gen_key()
-m = "meow meow"
-
-if not (0 < r < q or 0 < s < q):
-    print("fail (0 < r < q or 0 < s < q) not satisfied")
-
-w = invert(s, q)
-u1 = (sha_string_to_int(m) * w) % q
-u2 = (r * w) % q
-v = ((fast_pow(g, u1, p) * fast_pow(y, u2, p)) % p) % q
-
-print("v =", v)
+    print("\nverify:")
+    v = verify(m, r, s, p, q)
+    print("v =", v)
