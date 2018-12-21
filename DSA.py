@@ -127,11 +127,11 @@ def sign(m, p, q, g, x):
     while s == 0:
         blind = random.randrange(2, q)
         k = random.randrange(2, q)
-
         inv_blind_k = invert(blind * k, q)
         blind_x = x * blind
         
         r = fast_pow(g, k, p) % q
+        # s = (invert(k, q) * sha_string_to_int(m) + x * r) % q
         s = (inv_blind_k * (sha_string_to_int(m) * blind + blind_x * r)) % q
     return r, s
 
