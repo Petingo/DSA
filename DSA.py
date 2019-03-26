@@ -1,166 +1,156 @@
+from functools import reduce
+from random import randint 
+from random import randrange, getrandbits
+import DSA_pq
+import random
 import hashlib
-import random, sys
 
-# set recursion limit to 10000 or it will reach the init limit 1000 when running extend_gcd()
-sys.setrecursionlimit(10000)
+N = 1024
+L = 160
 
-# square and multiply（快速冪）
-# x ^ h mod n
-def fast_pow(x, h, n):
-    y = 1
-    h = bin(h)[2:] # convert h into binary
-    for i in range(len(h)):
-        y = (y ** 2) % n
-        if h[i] == '1':
-            y = (y * x) % n
-
-    return y
-
-# 歐幾里得算法（輾轉相除法）
-def gcd(a, b):
-	while b != 0:
-		a, b = b, a % b
-	return a
-
-# 擴展歐幾里得算法
-def extend_gcd(a, b):
-     if b == 0:
-         return 1, 0, a
-     else:
-         x, y, gcd = extend_gcd(b, a % b)
-         x, y = y, (x - (a // b) * y)
-         return x, y, gcd
-
-# 求 a 對同於 m 的乘法反元素
-def invert(a, m):
-    x, y, gcd = extend_gcd(a, m)
-    if (gcd == 1):
-        return x % m
+def extGCD(a, b):
+    if b == 0:
+        return 1, 0, a
     else:
-        return None
+        x, y, q = extGCD(b, a % b) # q = gcd(a, b) = gcd(b, a%b)
+        x, y = y, (x - (a // b) * y)
+        return x, y, q
 
-# miller-rabin test，用於驗證質數
-def miller_rabin_test(n, confidence=40):
-    k = 0
-    m = (n - 1)
-    while m % 2 == 0:
-        m = m // 2
-        k = k + 1
-    while confidence > 0:
-        # choose only odd a
-        a = random.randrange(n - 4) + 2
-        while a % 2 == 0:
-            a = random.randrange(n - 4) + 2
+def squreAndMultiply(plain, e, n):
+    binary = bin(e)[2:]
+    result = 1
+    for i in binary:
+        result = (result * result) % n
+        if i == '1':
+            result = (result * plain) % n
+    return result
 
-        b = fast_pow(a, m, n)
+def miller_rabin(n, k=100):
+    if n < 2:
+        return False
 
-        if b != 1 and b != n - 1:
-            i = 1
-            while i < k and b != n - 1:
-                b = (b ** 2) % n
-                if b == 1:
+    # d * 2 ^ s
+    s = 0 
+    d = n-1
+    while d % 2 == 0:
+        s += 1
+        d /= 2
+    
+
+    # If 𝑥^2 ≡ 1 (mod 𝑝) for a prime 𝑝, then 𝑥 = ±1 (mod 𝑝)
+    # If 𝑥 ≠ ±1 (mod 𝑁) but 𝑥^2 ≡ 1 (mod 𝑁) , then 𝑁 is a composite 
+    for i in range(k):
+        a = randrange(2, n - 1)
+        b = squreAndMultiply(a,int(d),n) # a^d % n,產生亂數,試圖找到witness
+        for j in range(s):
+            if b != 1 and b != n-1:    #𝑥 ≠ ±1 (mod 𝑁)
+                b = squreAndMultiply(b, 2, n)
+                if b == 1: # 𝑥^2 ≡ 1 (mod 𝑁)
                     return False
-                i = i + 1
-
-            if b != n - 1:
-                return False
-
-        confidence -= 1
-
     return True
+    
+def genPrime(n):
+    p = random.randint(0,pow(2,n))
+    while(miller_rabin(p) == False):
+        p = random.randint(0,pow(2,n))
+    return p
 
-# 生成大質數
-def gen_big_prime(bits=1024):
-    tmp = random.getrandbits(bits)
-    # if the prime < 5, there will be an error when running 'random.randrange(n - 4) + 2' in miller_rabin_test() 
-    while len(bin(tmp))-2 != bits or tmp < 5 or miller_rabin_test(tmp) == False:
-        tmp = random.getrandbits(bits)
-    return tmp
 
-def sha_string_to_int(m):
-    return int(hashlib.sha1(m.encode()).hexdigest(), 16)
-
-def sha(n):
-    return hashlib.sha1(bin(n).encode())
-
-def sha_to_int(n):
-    return int(sha(n).hexdigest(), 16)
-
-def gen_param(L=1024):
-    found = False
-    while not found:
-        S = random.getrandbits(20)
-        q = gen_big_prime(160)
-
-        n = (L-1) // 160
-        b = (q >> 5) & 15
-        C = 0
-        N = 2
-        V = {}
-        powb = pow(2, b)
-        powL1 = pow(2, L-1)
-
-        while C < 4096:
-            for k in range(0, n+1):
-                V[k] = sha_to_int(S + N + k)
-            W = V[n] % powb
-            for k in range(n-1, -1, -1):
-                W = (W << 160) + V[k]
-            X = W + powL1
-            p = X-(X % (2 * q) - 1)
-            if(powL1 <= p and miller_rabin_test(p)):
-                found = True
-                break;
-            C += 1
-            N += n + 1
+def genPrimePQ():
+    q = genPrime(L)
+    # p = genPrime(N)
+    cnt = int(pow(2, 1024) / q)
+    while(not miller_rabin(q * cnt + 1)):
+        cnt -= 1
+    p = q * cnt + 1
     return p, q
 
-def gen_key():
-    p, q = gen_param()
-    g = fast_pow(2, (p - 1) // q, p)
-    x = random.randrange(1, q)
-    y = fast_pow(g, x, p)
+def genG(p, q):
+    h = 2
+    g = squreAndMultiply(h, int((p - 1) / q), p)
+    while( squreAndMultiply(g , q , p) != 1):
+        h += 1
+        g = squreAndMultiply(h, int((p - 1) / q), p)
+    return g
+
+def genX(q):
+    return random.randint(1, q)
+
+def genY(g, x, p):
+    return squreAndMultiply(g, x, p)
+
+def genKR(p, q, g):
+    k = random.randint(1, q)
+    # k=15
+    r = squreAndMultiply(g, k, p) % q
+    while r == 0:
+        k = random.randint(1, q)
+        r = squreAndMultiply(g, k, p) % q
+    return k, r
+
+def H(m):
+    sha1 = hashlib.sha1()
+    sha1.update(m.encode("utf-8"))
+    return(sha1.hexdigest())
+
+def toPositive(n,r):
+    while n<=0:
+        n+=r
+    return n
+
+def genKey():
+    # p = 303287
+    # q = 151643  
+    p, q = DSA_pq.gen_param()
+    g = genG(p, q)
+    x = genX(q)
+    y = genY(g, x, p)
     return p, q, g, x, y
 
 def sign(m, p, q, g, x):
-    s = 0
+    k, r = genKR(p, q, g)
+    print(extGCD(k,q))
+    inv = extGCD(q,k)[1]
+    inv = toPositive(inv,q)
+    h = int(H(m), 16)
+    s = inv * (h + x * r)  % q
     while s == 0:
-        blind = random.randrange(2, q)
-        k = random.randrange(2, q)
-        inv_blind_k = invert(blind * k, q)
-        blind_x = x * blind
-        
-        r = fast_pow(g, k, p) % q
-        # s = (invert(k, q) * sha_string_to_int(m) + x * r) % q
-        s = (inv_blind_k * (sha_string_to_int(m) * blind + blind_x * r)) % q
+        k, r = genKR(p, q, g)
+        inv = extGCD(q,k)[1]
+        inv = toPositive(inv,q)
+        h = int(H(m), 16) 
+        s = inv * (h + x * r)  % q
     return r, s
 
 def verify(m, r, s, p, q):
-    if not (0 < r < q or 0 < s < q):
-        print("fail (0 < r < q or 0 < s < q) not satisfied")
+    if 0 < r and r < q or 0 < s and s < q:
+        w = extGCD(q,s)[1]
+        w = toPositive(w,q)
+        u1 = (int(H(m), 16)  * w) % q
+        u2 = (r * w) % q
+        # v = (squreAndMultiply(g, u1 ,p) * squreAndMultiply(y, u2 ,p))  % q
+        v = pow(g,u1) * pow(y,u2) % p % q
+        return v == r % q
 
-    w = invert(s, q)
-    u1 = (sha_string_to_int(m) * w) % q
-    u2 = (r * w) % q
-    v = ((fast_pow(g, u1, p) * fast_pow(y, u2, p)) % p) % q
-    
-    # print("v =", v)
-    return v == r
 
-if __name__ == "__main__":    
-    print("keys:")
-    p, q, g, x, y = gen_key()
-    print("p =", p)
-    print("q =", q)
-    # print("d =", p % q)
 
-    print("\nsign:")
-    m = "meow meow"
-    r, s = sign(m, p, q, g, x)
-    print("m =", m)
-    print("r =", r)
-    print("s =", s)
 
-    print("\nverify:")
-    v = verify(m, r, s, p, q)
-    print("v =", v)
+# p = 303287
+# q = 151643
+# # p = 67
+# # q = 11
+# # p = 283
+# # q = 47
+# # print(miller_rabin(p))
+# # print(miller_rabin(q))
+# # print((p - 1) % q)
+
+
+p, q, g, x, y = genKey()
+print(p, q, g, x, y)
+r, s = sign('hfadgd', p, q, g, x)
+print('r = ' + str(r))
+print('s = ' + str(s))
+
+v = verify('hfadgd', r, s, p, q)
+print('v = ' + str(v))
